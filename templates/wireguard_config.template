@@ -1,0 +1,9 @@
+[Interface]
+Address = {from_server_wg_ip}
+PrivateKey = {from_server_private_key}
+ListenPort = {from_server_listen_port}
+
+[Peer]
+PublicKey = {to_server_public_key}
+Endpoint = {to_server_wan_ip}:{to_server_listen_port}
+AllowedIPs = {to_server_subnet},{to_server_wg_ip}/32
