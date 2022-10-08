@@ -1,11 +1,38 @@
 import os
+import subprocess
 from typing import Dict, List
 from threading import Thread
 
-import util
-
+from icmplib import ping
 
 WG_CONFIG_PATH = "/etc/wireguard"
+
+
+def ping_retry(address, retry=0):
+	host = None
+	ping(address, retry)
+	while retry >= 0:
+		try:
+			host = ping(address, count=1, interval=1, timeout=0.5, privileged=False)
+		except Exception as e:
+			print(e)
+			retry -= 1
+			continue
+
+		if not host.is_alive:
+			retry -= 1
+		else:
+			retry = -1
+
+	if not host:
+		return False
+
+	return host.is_alive
+
+
+def execute_shell_command(command: str) -> str:
+	p = subprocess.Popen(command, stdout=subprocess.PIPE, shell=True)
+	return p.stdout.read().decode("utf-8")
 
 
 def read_wg_configs():
@@ -44,9 +71,10 @@ def read_wg_configs():
 
 
 def read_active_map(config):
-	routes = util.execute_shell_command("ip route")
+	routes = execute_shell_command("ip route")
 	active_dict = {}
 	for target in config["targets"]:
+		has_active_route = False
 		for route in routes.split("\n"):
 			if route.find(target) == -1:
 				continue
@@ -56,7 +84,18 @@ def read_active_map(config):
 
 			for interface in config["targets"][target]:
 				if route.find(interface["interface_name"]) != -1:
-					active_dict[interface["interface_name"]] = interface
+					active_dict[interface["interface_name"]] = {
+						**interface,
+						"alive": True
+					}
+					has_active_route = True
+
+		if not has_active_route:
+			interface = config["targets"][target][0]
+			active_dict[interface["interface_name"]] = {
+				**interface,
+				"alive": False
+			}
 
 	return active_dict
 
@@ -66,11 +105,16 @@ def health_check(interfaces):
 	threads = []
 
 	def ping_and_report(interface):
-		alive = util.ping_retry(interface["ip"], 3)
+		nonlocal result
+		if not interface.get("alive", True):
+			result[interface["interface_name"]] = False
+			return
+
+		alive = ping_retry(interface["ip"], 3)
 		result[interface["interface_name"]] = alive
 
 	for interface in interfaces:
-		t = Thread(target=lambda: ping_and_report(interface))
+		t = Thread(target=ping_and_report, args=[interface])
 		threads.append(t)
 
 	for t in threads:
@@ -82,21 +126,30 @@ def health_check(interfaces):
 	return result
 
 
-def switch_traffic(from_interface, to_interface, subnet):
-	util.execute_shell_command(f"ip route del {from_interface} dev {subnet}")
-	util.execute_shell_command(f"ip route add {to_interface} dev {subnet}")
+def switch_traffic(from_interface_name, to_interface_name, subnet):
+	execute_shell_command(f"ip route del {subnet} dev {from_interface_name}")
+	execute_shell_command(f"ip route add {subnet} dev {to_interface_name}")
+
+
+def add_peer_route(interface):
+	execute_shell_command(f"ip route add {interface['ip']} dev {interface['interface_name']}")
 
 
 if __name__ == "__main__":
 	config = read_wg_configs()
+	for interfaces in config['targets'].values():
+		for interface in interfaces:
+			add_peer_route(interface)
 	active_map = read_active_map(config)
-	result = health_check(active_map.items())
+	result = health_check(active_map.values())
 	for interface_name, alive in result.items():
 		if alive:
 			continue
 
+		print(f"{interface_name} is down")
 		subnet = active_map[interface_name]["target_subnet"]
-		fail_overs = health_check(config[active_map[interface_name]["target_subnet"]])
-		for new_interface_name, new_alive in fail_overs:
+		fail_overs = health_check(config["targets"][subnet])
+		for new_interface_name, new_alive in fail_overs.items():
 			if new_alive:
+				print(f"switching {interface_name} to {new_interface_name}")
 				switch_traffic(interface_name, new_interface_name, subnet)

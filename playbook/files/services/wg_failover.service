@@ -1,0 +1,7 @@
+[Unit]
+Description=Run wireguard failover script
+
+[Service]
+ExecStart=/usr/bin/python3 /etc/wg_scripts/wg_failover_monitor.py
+StandardOutput=file:/var/log/wg_failover.log
+StandardError=file:/var/log/wg_failover.err

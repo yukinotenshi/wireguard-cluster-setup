@@ -2,3 +2,5 @@ venv
 __pycache__
 .idea
 result
+playbook/inventory
+playbook/files/per_host/

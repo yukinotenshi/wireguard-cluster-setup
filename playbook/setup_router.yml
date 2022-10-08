@@ -1,0 +1,61 @@
+- name: Setup site router
+  hosts: routers
+  remote_user: root
+
+  tasks:
+    - name: Update apt cache and install wireguard tools
+      ansible.builtin.apt:
+        name: wireguard-tools
+        state: present
+        update_cache: yes
+
+    - name: Copy wireguard configs to /etc/wireguard
+      ansible.builtin.copy:
+        src: "per_host/{{ ansible_host }}/wireguard/"
+        dest: /etc/wireguard
+
+    - name: Enable UFW for router peers
+      community.general.ufw:
+        state: enabled
+        rule: allow
+        proto: udp
+        src: "{{item}}"
+      loop: "{{ peers }}"
+
+    - name: Enable ip forward
+      ansible.posix.sysctl:
+        name: net.ipv4.ip_forward
+        value: '1'
+        sysctl_set: yes
+        state: present
+        reload: yes
+
+    - name: Enable and start wg-quick services
+      ansible.builtin.systemd:
+        name: "wg-quick@{{ item }}.service"
+        state: restarted
+        enabled: yes
+        daemon_reload: yes
+      loop: "{{ wg_configs }}"
+
+    - name: Copy scripts
+      ansible.builtin.copy:
+        src: scripts/
+        dest: /etc/wg_scripts/
+
+    - name: Copy services
+      ansible.builtin.copy:
+        src: services/
+        dest: /etc/systemd/system/
+
+    - name: Install icmplib
+      ansible.builtin.pip:
+        name: icmplib
+        executable: pip3
+
+    - name: Enable and start wg-failover timer
+      ansible.builtin.systemd:
+        name: "wg_failover.timer"
+        state: restarted
+        enabled: yes
+        daemon_reload: yes

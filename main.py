@@ -3,6 +3,8 @@ import json
 from random import randint
 from typing import List, Dict
 
+import yaml
+
 import util
 from model import RouterType, SiteType, ConfigType
 
@@ -92,11 +94,36 @@ class WireGuardConfigGenerator:
                 os.mkdir(cur_path)
 
             for name, c in configs.items():
-                with open(os.path.join(cur_path, name), 'w') as f:
+                with open(os.path.join(cur_path, f"{name}.conf"), 'w') as f:
                     f.write(c)
+
+    def dump_inventory(self, folder_name: str):
+        inventory: Dict = {
+            "routers": {
+                "hosts": {
+
+                },
+                "vars": {
+                    "peers": [
+
+                    ]
+                }
+            }
+        }
+        for ip, configs in self.wg_configs.items():
+            inventory["routers"]["vars"]["peers"].append(ip)
+            inventory["routers"]["hosts"][ip] = {
+                "wg_configs": [],
+            }
+            for name in configs.keys():
+                inventory["routers"]["hosts"][ip]["wg_configs"].append(name)
+
+        with open(os.path.join(folder_name, "inventory"), "w") as f:
+            yaml.dump(inventory, f)
 
 
 if __name__ == "__main__":
     generator = WireGuardConfigGenerator()
     generator.generate_all()
-    generator.dump_to_folder("result")
+    generator.dump_to_folder("playbook/files/per_host")
+    generator.dump_inventory("playbook")
